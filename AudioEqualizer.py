@@ -16,9 +16,9 @@ class AudioEqualizer(QtWidgets.QMainWindow):
         
         # 2. Setup Plot
         self.plot = self.view.addPlot(title="Frequency Spectrum")
-        self.plot.setYRange(0, 70, padding=0)  # Set to 70 to fill more of the screen
+        self.plot.setYRange(-60, 0, padding=0)  # Professional audio scale: 0 dB = max, -60 dB = silence
         self.plot.setXRange(0, 80, padding=0.02)
-        self.plot.setLabel('left', 'Intensity (dB)')
+        self.plot.setLabel('left', 'Level (dB)')
         self.plot.setLabel('bottom', 'Frequency Band')
         self.plot.showGrid(x=False, y=True, alpha=0.3)
         
@@ -30,7 +30,7 @@ class AudioEqualizer(QtWidgets.QMainWindow):
             hue = i / self.num_bars  # 0 to 1
             rgb = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
             color = (int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255))
-            bar = pg.BarGraphItem(x=[i], height=[0], width=0.9, brush=color)
+            bar = pg.BarGraphItem(x=[i], height=[0], width=0.9, brush=color, y0=-60)  # Bars grow from -60 upward
             self.plot.addItem(bar)
             self.bars.append(bar)
 
@@ -134,7 +134,7 @@ class AudioEqualizer(QtWidgets.QMainWindow):
         self.timer.start(30) # ~30 FPS
         
         # Noise gate and sensitivity settings
-        self.noise_threshold = 8  # Adjust this value (10-30) - higher = less sensitive to noise
+        self.noise_threshold = 0  # Adjust this value (10-30) - higher = less sensitive to noise
         self.sensitivity = 0.9  # Controls overall bar height (0.1 = quiet, 1.0 = loud)
         self.peak_hold = 0  # Tracks the highest FFT value seen for better normalization
 
@@ -216,12 +216,15 @@ class AudioEqualizer(QtWidgets.QMainWindow):
                 
                 # Normalize using peak hold for more stable visualization
                 if self.peak_hold > 1:
-                    fft_bars = (fft_bars / self.peak_hold) * 70 * self.sensitivity  # Scale to 70
+                    fft_bars = (fft_bars / self.peak_hold) * 60 * self.sensitivity  # Scale to 60 dB range
                 else:
                     fft_bars = fft_bars * self.sensitivity
                 
-                # Clip to 0-70 range
-                fft_bars = np.clip(fft_bars, 0, 70)
+                # Keep positive values (0 to 60) - bars will draw from y0=-60 upward
+                # So a value of 40 means bar goes from -60 to -20 dB
+                
+                # Clip to 0 to 60 range
+                fft_bars = np.clip(fft_bars, 0, 60)
                 
                 # Update bar heights with smoothing
                 for i in range(self.num_bars):
