@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 import pyaudio
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
 import colorsys
 
@@ -9,30 +9,73 @@ class AudioEqualizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         # 1. Setup UI
-        self.view = pg.GraphicsLayoutWidget(title="Python Real-time Equalizer")
+        self.view = pg.GraphicsLayoutWidget(title="🎵 Premium Audio Visualizer")
         self.setCentralWidget(self.view)
-        self.setWindowTitle('Real-time Audio Visualizer')
-        self.resize(1000, 500)
+        self.setWindowTitle('🎵 Premium Audio Visualizer')
+        self.resize(1200, 700)
         
-        # 2. Setup Plot
-        self.plot = self.view.addPlot(title="Frequency Spectrum")
-        self.plot.setYRange(-60, 0, padding=0)  # Professional audio scale: 0 dB = max, -60 dB = silence
+        # Set dark background with style
+        self.view.setBackground((10, 10, 15))
+        
+        # 2. Setup Plot with symmetrical layout
+        self.plot = self.view.addPlot(title="<span style='color: #00ffff; font-size: 16pt; font-weight: bold;'>✨ Frequency Spectrum ✨</span>")
+        self.plot.setYRange(-50, 50, padding=0.05)  # Symmetrical: -50 to +50
         self.plot.setXRange(0, 80, padding=0.02)
-        self.plot.setLabel('left', 'Level (dB)')
-        self.plot.setLabel('bottom', 'Frequency Band')
-        self.plot.showGrid(x=False, y=True, alpha=0.3)
+        self.plot.setLabel('left', '<span style="color: #00ffff;">Level (dB)</span>')
+        self.plot.setLabel('bottom', '<span style="color: #00ffff;">Frequency Band</span>')
+        self.plot.showGrid(x=False, y=True, alpha=0.2)
+        self.plot.getAxis('left').setPen((0, 255, 255, 100))
+        self.plot.getAxis('bottom').setPen((0, 255, 255, 100))
         
-        # Create colorful bars using rainbow gradient
+        # Create stunning mirror-effect bars
         self.num_bars = 80
-        self.bars = []
+        self.bars_top = []  # Bars growing upward
+        self.bars_bottom = []  # Bars growing downward (mirror)
+        self.peak_indicators_top = []  # Peak hold dots for top bars
+        self.peak_indicators_bottom = []  # Peak hold dots for bottom bars (mirror)
+        self.peak_values_top = np.zeros(self.num_bars)  # Track peak heights for top
+        self.peak_values_bottom = np.zeros(self.num_bars)  # Track peak heights for bottom
+        self.peak_fall_speed = 0.7  # How fast peaks fall (increased for more dynamic effect)
+        
         for i in range(self.num_bars):
-            # Rainbow gradient using HSV color space
-            hue = i / self.num_bars  # 0 to 1
-            rgb = colorsys.hsv_to_rgb(hue, 1.0, 1.0)
-            color = (int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255))
-            bar = pg.BarGraphItem(x=[i], height=[0], width=0.9, brush=color, y0=-60)  # Bars grow from -60 upward
-            self.plot.addItem(bar)
-            self.bars.append(bar)
+            # Dynamic color based on position (rainbow spectrum)
+            hue = i / self.num_bars
+            rgb = colorsys.hsv_to_rgb(hue, 0.9, 1.0)
+            color = (int(rgb[0] * 255), int(rgb[1] * 255), int(rgb[2] * 255), 200)
+            
+            # Create gradient brush for depth effect
+            gradient = QtGui.QLinearGradient(0, 0, 0, 1)
+            gradient.setColorAt(0, QtGui.QColor(*color))
+            gradient.setColorAt(1, QtGui.QColor(color[0]//2, color[1]//2, color[2]//2, 180))
+            brush = QtGui.QBrush(gradient)
+            
+            # Top bar (grows upward from center)
+            bar_top = pg.BarGraphItem(x=[i], height=[0], width=0.85, brush=color, pen=pg.mkPen(color, width=1.5), y0=0)
+            self.plot.addItem(bar_top)
+            self.bars_top.append(bar_top)
+            
+            # Bottom bar (mirror - grows downward from center)
+            bar_bottom = pg.BarGraphItem(x=[i], height=[0], width=0.85, brush=color, pen=pg.mkPen(color, width=1.5), y0=0)
+            self.plot.addItem(bar_bottom)
+            self.bars_bottom.append(bar_bottom)
+            
+            # Peak indicator for top bar (glowing dot)
+            peak_dot_top = pg.ScatterPlotItem(pos=[[i, 0]], size=8, pen=pg.mkPen(None), 
+                                         brush=pg.mkBrush(255, 255, 255, 220), 
+                                         symbol='o', pxMode=True)
+            self.plot.addItem(peak_dot_top)
+            self.peak_indicators_top.append(peak_dot_top)
+            
+            # Peak indicator for bottom bar (mirror - falls upward from bottom)
+            peak_dot_bottom = pg.ScatterPlotItem(pos=[[i, 0]], size=8, pen=pg.mkPen(None), 
+                                         brush=pg.mkBrush(255, 255, 255, 220), 
+                                         symbol='o', pxMode=True)
+            self.plot.addItem(peak_dot_bottom)
+            self.peak_indicators_bottom.append(peak_dot_bottom)
+        
+        # Add center line for reference
+        center_line = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen((0, 255, 255, 80), width=2, style=QtCore.Qt.DashLine))
+        self.plot.addItem(center_line)
 
         # 3. Setup Audio Capture
         self.CHUNK = 2048  # Increased for better frequency resolution
@@ -131,12 +174,21 @@ class AudioEqualizer(QtWidgets.QMainWindow):
         # 4. Refresh Timer (to update the bars)
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update)
-        self.timer.start(30) # ~30 FPS
+        self.timer.start(25)  # ~40 FPS for smoother animation
         
-        # Noise gate and sensitivity settings
-        self.noise_threshold = 0  # Adjust this value (10-30) - higher = less sensitive to noise
-        self.sensitivity = 0.9  # Controls overall bar height (0.1 = quiet, 1.0 = loud)
-        self.peak_hold = 0  # Tracks the highest FFT value seen for better normalization
+        # Enhanced visualization settings
+        self.noise_threshold = 0
+        self.sensitivity = 1.2  # Increased for more dramatic effect
+        self.peak_hold = 0
+        
+        # Animation smoothing with velocity for physics-based movement
+        self.bar_velocities = np.zeros(self.num_bars)
+        self.bar_accelerations = np.zeros(self.num_bars)
+        self.current_heights = np.zeros(self.num_bars)
+        
+        # Bass reactivity for background pulse
+        self.bass_intensity = 0
+        self.bass_smoothing = 0.85
 
     def update(self):
         try:
@@ -151,27 +203,31 @@ class AudioEqualizer(QtWidgets.QMainWindow):
             # Check if there's actual audio signal (not just digital noise)
             audio_level = np.abs(data_int).mean()
             
-            # Debug: Print audio level every ~1 second (30 frames at 30 FPS)
+            # Debug: Print audio level every ~1 second (40 frames at 40 FPS)
             if not hasattr(self, '_frame_count'):
                 self._frame_count = 0
             self._frame_count += 1
-            if self._frame_count % 30 == 0:
+            if self._frame_count % 40 == 0:
                 print(f"Audio level: {audio_level:.1f}", end='\r')
             
-            if audio_level < 30:  # If audio level is too low, don't update bars
-                # Fade out bars gradually
+            if audio_level < 30:
+                # Smooth fade out with physics
+                self.current_heights *= 0.85
+                self.bar_velocities *= 0.9
                 for i in range(self.num_bars):
-                    current_height_data = self.bars[i].opts['height']
-                    if isinstance(current_height_data, (list, np.ndarray)) and len(current_height_data) > 0:
-                        current_height = current_height_data[0]
-                    elif isinstance(current_height_data, (int, float, np.number)):
-                        current_height = float(current_height_data)
-                    else:
-                        current_height = 0
+                    self.bars_top[i].setOpts(height=self.current_heights[i])
+                    self.bars_bottom[i].setOpts(height=-self.current_heights[i])
                     
-                    # Fade to zero
-                    fade_height = current_height * 0.7
-                    self.bars[i].setOpts(height=fade_height)
+                    # Update peak indicators (top falls down, bottom falls up)
+                    self.peak_values_top[i] = max(self.peak_values_top[i] - self.peak_fall_speed, 0)
+                    self.peak_indicators_top[i].setData(pos=[[i, self.peak_values_top[i]]])
+                    
+                    self.peak_values_bottom[i] = min(self.peak_values_bottom[i] + self.peak_fall_speed, 0)
+                    self.peak_indicators_bottom[i].setData(pos=[[i, self.peak_values_bottom[i]]])
+                
+                # Fade bass effect
+                self.bass_intensity *= 0.9
+                self._update_background()
                 return
             
             # Apply Hamming window to reduce spectral leakage
@@ -220,30 +276,89 @@ class AudioEqualizer(QtWidgets.QMainWindow):
                 else:
                     fft_bars = fft_bars * self.sensitivity
                 
-                # Keep positive values (0 to 60) - bars will draw from y0=-60 upward
-                # So a value of 40 means bar goes from -60 to -20 dB
+                # Scale to 0-50 range for symmetrical display
+                fft_bars = np.clip(fft_bars, 0, 60) * (50/60)
                 
-                # Clip to 0 to 60 range
-                fft_bars = np.clip(fft_bars, 0, 60)
+                # Calculate bass intensity (average of first 10 bars for low frequencies)
+                bass_level = np.mean(fft_bars[:10])
+                self.bass_intensity = self.bass_intensity * self.bass_smoothing + bass_level * (1 - self.bass_smoothing)
                 
-                # Update bar heights with smoothing
+                # Update bars with physics-based smooth animation
                 for i in range(self.num_bars):
-                    # Get current height safely
-                    current_height_data = self.bars[i].opts['height']
-                    if isinstance(current_height_data, (list, np.ndarray)) and len(current_height_data) > 0:
-                        current_height = current_height_data[0]
-                    elif isinstance(current_height_data, (int, float, np.number)):
-                        current_height = float(current_height_data)
-                    else:
-                        current_height = 0
+                    target_height = fft_bars[i]
                     
-                    new_height = fft_bars[i]
-                    # Smooth transition
-                    smooth_height = current_height * 0.5 + new_height * 0.5
-                    self.bars[i].setOpts(height=smooth_height)
+                    # Calculate acceleration towards target (spring physics)
+                    self.bar_accelerations[i] = (target_height - self.current_heights[i]) * 0.5
+                    
+                    # Update velocity with damping
+                    self.bar_velocities[i] = self.bar_velocities[i] * 0.6 + self.bar_accelerations[i]
+                    
+                    # Update position
+                    self.current_heights[i] += self.bar_velocities[i]
+                    self.current_heights[i] = max(0, self.current_heights[i])  # Clamp to positive
+                    
+                    # Dynamic color intensity based on height
+                    intensity = min(1.0, self.current_heights[i] / 40)
+                    hue = i / self.num_bars
+                    rgb = colorsys.hsv_to_rgb(hue, 0.8 + intensity * 0.2, 0.7 + intensity * 0.3)
+                    glow = 150 + int(intensity * 105)  # Brightness glow effect
+                    color = (int(rgb[0] * glow), int(rgb[1] * glow), int(rgb[2] * glow), 200)
+                    
+                    # Add extra glow to bass frequencies (first 20 bars)
+                    if i < 20:
+                        bass_boost = 1.0 + (self.bass_intensity / 50) * 0.5
+                        color = (min(255, int(color[0] * bass_boost)), 
+                                min(255, int(color[1] * bass_boost)), 
+                                min(255, int(color[2] * bass_boost)), 220)
+                    
+                    # Update top and bottom bars (mirror effect)
+                    self.bars_top[i].setOpts(height=self.current_heights[i], brush=color, pen=pg.mkPen(color, width=2))
+                    self.bars_bottom[i].setOpts(height=-self.current_heights[i], brush=color, pen=pg.mkPen(color, width=2))
+                    
+                    # Update peak indicators with smooth fall (top and bottom mirror)
+                    # Top peak indicator (falls downward from peak)
+                    if self.current_heights[i] > self.peak_values_top[i]:
+                        self.peak_values_top[i] = self.current_heights[i]
+                    else:
+                        self.peak_values_top[i] = max(self.peak_values_top[i] - self.peak_fall_speed, 0)
+                    
+                    # Bottom peak indicator (falls upward from bottom peak)
+                    if -self.current_heights[i] < self.peak_values_bottom[i]:
+                        self.peak_values_bottom[i] = -self.current_heights[i]
+                    else:
+                        self.peak_values_bottom[i] = min(self.peak_values_bottom[i] + self.peak_fall_speed, 0)
+                    
+                    # Make peak dots glow more when near extremes
+                    peak_alpha = 150 + int((self.peak_values_top[i] / 50) * 105)
+                    dot_size = 6 + int(intensity * 4)
+                    
+                    # Update top peak dot
+                    self.peak_indicators_top[i].setData(pos=[[i, self.peak_values_top[i]]], 
+                                                   brush=pg.mkBrush(255, 255, 255, peak_alpha),
+                                                   size=dot_size)
+                    
+                    # Update bottom peak dot (mirror)
+                    self.peak_indicators_bottom[i].setData(pos=[[i, self.peak_values_bottom[i]]], 
+                                                   brush=pg.mkBrush(255, 255, 255, peak_alpha),
+                                                   size=dot_size)
+                
+                # Update background based on bass
+                self._update_background()
                 
         except Exception as e:
             print(f"Error reading audio: {e}")
+    
+    def _update_background(self):
+        """Update background color based on bass intensity for immersive effect"""
+        # Calculate pulsing background color
+        bass_factor = min(1.0, self.bass_intensity / 30)
+        
+        # Subtle color shift from dark blue to purple/red with bass
+        r = int(10 + bass_factor * 30)
+        g = int(10 + bass_factor * 5)
+        b = int(15 + bass_factor * 25)
+        
+        self.view.setBackground((r, g, b))
 
     def closeEvent(self, event):
         self.stream.stop_stream()
